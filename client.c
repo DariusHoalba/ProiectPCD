@@ -5,11 +5,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #define BUFFER_SIZE 4096
 #define PORT 12345
-#define END_SIGNAL "END_OF_FILE"
-#define END_SIGNAL_LEN 11  // Length of END_SIGNAL
+#define END_SIGNAL "done"
+#define END_SIGNAL_LEN 4  // Length of END_SIGNAL
 
 // Function to generate modified file name
 void generate_modified_filename(const char *input_filename, char *output_filename) {
@@ -23,11 +24,24 @@ void generate_modified_filename(const char *input_filename, char *output_filenam
     }
 }
 
+// Function to check if the file has a valid extension
+int is_valid_extension(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if (!dot) {
+        return 0;
+    }
+    if (strcmp(dot, ".jpeg") == 0 || strcmp(dot, ".jpg") == 0 || strcmp(dot, ".bmp") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
 int main() {
     int client_socket;
     struct sockaddr_in server_addr;
     char buffer[BUFFER_SIZE];
     FILE *file;
+    struct stat path_stat;
 
     // Create socket
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -44,6 +58,7 @@ int main() {
     // Connect to server
     if (connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Connection to server failed");
+        close(client_socket);
         return 1;
     }
 
@@ -55,19 +70,35 @@ int main() {
         scanf("%1023s", filepath);
 
         if (strcmp(filepath, "done") == 0) {
+            // Send the done signal to the server
+            send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
             break;
+        }
+
+        // Check if the path is a directory
+        if (stat(filepath, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+            printf("Specified path is a directory, please enter a file path.\n");
+            continue;  // Prompt for another file path
+        }
+
+        // Check if the file has a valid extension
+        if (!is_valid_extension(filepath)) {
+            printf("Invalid file type. Only .jpeg, .jpg, and .bmp files are allowed.\n");
+            continue;  // Prompt for another file path
         }
 
         // Open file for reading
         file = fopen(filepath, "rb");
         if (file == NULL) {
             perror("Failed to open file");
-            continue;
+            continue;  // Prompt for another file path
         }
 
+        long long bytes_sent = 0;
         // Send the file in chunks
         while (!feof(file)) {
             size_t bytes_read = fread(buffer, 1, BUFFER_SIZE, file);
+            bytes_sent += bytes_read;
             if (send(client_socket, buffer, bytes_read, 0) < 0) {
                 perror("Failed to send file data");
                 fclose(file);
@@ -75,8 +106,11 @@ int main() {
                 return 1;
             }
         }
+        send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
         fclose(file);
         printf("File sent successfully.\n");
+
+        printf("\n\nBytes send: %lld\n\n", bytes_sent);
 
         // Receive the processed file
         char output_filename[1024];
@@ -91,11 +125,11 @@ int main() {
         printf("Receiving data...\n");
         int bytes_received;
         while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-            fwrite(buffer, 1, bytes_received, output_file);
-            if (bytes_received < BUFFER_SIZE) {
-                // End of file reached
+            printf("%s %d\n", "Bytes received: ", bytes_received);
+            if (strncmp(buffer, END_SIGNAL, END_SIGNAL_LEN) == 0) {
                 break;
             }
+            fwrite(buffer, 1, bytes_received, output_file);
         }
 
         fclose(output_file);
