@@ -14,23 +14,56 @@
 #define END_SIGNAL "done"
 
 #pragma pack(push, 1)
+
+uint32_t invert_color(uint32_t color, uint32_t mask) {
+    return (~color) & mask;
+}
 typedef struct {
-    unsigned short type;
-    unsigned int size;
-    unsigned short reserved1, reserved2;
-    unsigned int offset;
+    uint16_t bfType;
+    uint32_t bfSize;
+    uint16_t bfReserved1;
+    uint16_t bfReserved2;
+    uint32_t bfOffBits;
+} BITMAPFILEHEADER2;
+
+typedef struct {
+    uint32_t biSize;
+    int32_t biWidth;
+    int32_t biHeight;
+    uint16_t biPlanes;
+    uint16_t biBitCount;
+    uint32_t biCompression;
+    uint32_t biSizeImage;
+    int32_t biXPelsPerMeter;
+    int32_t biYPelsPerMeter;
+    uint32_t biClrUsed;
+    uint32_t biClrImportant;
+} BITMAPINFOHEADER2;
+
+typedef struct {
+    uint16_t bfType;
+    uint32_t bfSize;
+    uint16_t bfReserved1;
+    uint16_t bfReserved2;
+    uint32_t bfOffBits;
 } BITMAPFILEHEADER;
 
 typedef struct {
-    unsigned int size;
-    int width, height;
-    unsigned short planes;
-    unsigned short bitCount;
-    unsigned int compression;
-    unsigned int sizeImage;
-    int xPelsPerMeter, yPelsPerMeter;
-    unsigned int clrUsed;
-    unsigned int clrImportant;
+    uint32_t biSize;
+    int32_t biWidth;
+    int32_t biHeight;
+    uint16_t biPlanes;
+    uint16_t biBitCount;
+    uint32_t biCompression;
+    uint32_t biSizeImage;
+    int32_t biXPelsPerMeter;
+    int32_t biYPelsPerMeter;
+    uint32_t biClrUsed;
+    uint32_t biClrImportant;
+    uint32_t biRedMask;
+    uint32_t biGreenMask;
+    uint32_t biBlueMask;
+    uint32_t biAlphaMask;
 } BITMAPINFOHEADER;
 #pragma pack(pop)
 
@@ -51,32 +84,148 @@ void invert_colors(unsigned char *img, unsigned long size) {
     }
 }
 
-// Function to handle BMP files
-void handle_bmp(int client_socket, FILE *file) {
-    BITMAPFILEHEADER bfHeader;
-    BITMAPINFOHEADER biHeader;
 
-    fread(&bfHeader, sizeof(BITMAPFILEHEADER), 1, file);
-    fread(&biHeader, sizeof(BITMAPINFOHEADER), 1, file);
+int handle_bmp(int client_socket, FILE *input_file) {
+    //printf("File size in bytes: %ld\n", ftell(input_file));
+    BITMAPFILEHEADER file_header;
+    fread(&file_header, sizeof(BITMAPFILEHEADER), 1, input_file);
+    if (file_header.bfType != 0x4D42) {
+        fprintf(stderr, "Error: Not a valid BMP file.\n");
+        fclose(input_file);
+        return 1;
+    }
+    BITMAPINFOHEADER info_header;
+    fread(&info_header, sizeof(BITMAPINFOHEADER), 1, input_file);
 
-    if (bfHeader.type != 0x4D42 || biHeader.bitCount != 32) {
-        perror("Unsupported BMP file format or bit depth (only 32-bit supported)");
-        return;
+    if (info_header.biBitCount != 32) {
+        fprintf(stderr, "Error: Only 32-bit BMP files are supported.\n");
+        fclose(input_file);
+        return 1;
+    }
+    if (info_header.biCompression != 3) {
+
+
+        fprintf(stderr, "[LOG]: BMP without BITFIELDS\n");
+        BITMAPFILEHEADER2 file_header;
+        fseek(input_file, 0, SEEK_SET);
+        fread(&file_header, sizeof(BITMAPFILEHEADER2), 1, input_file);
+
+        if (file_header.bfType != 0x4D42) {
+            fprintf(stderr, "Error: Not a valid BMP file.\n");
+            //fclose(input_file);
+            return 1;
+        }
+
+        BITMAPINFOHEADER2 info_header;
+        fread(&info_header, sizeof(BITMAPINFOHEADER2), 1, input_file);
+
+        if (info_header.biBitCount != 32) {
+            fprintf(stderr, "Error: Only 32-bit BMP files are supported.\n");
+            //fclose(input_file);
+            return 1;
+        }
+
+        fseek(input_file, file_header.bfOffBits, SEEK_SET);
+
+        uint8_t *pixel_data = (uint8_t *)malloc(info_header.biSizeImage);
+        if (!pixel_data) {
+            fprintf(stderr, "Error: Could not allocate memory for pixel data.\n");
+            //fclose(input_file);
+            return 1;
+        }
+
+
+        fread(pixel_data, 1, info_header.biSizeImage, input_file);
+        //fclose(input_file);
+
+        invert_colors(pixel_data, info_header.biSizeImage);
+
+
+        /// send the data to the client
+        long total_size = sizeof(BITMAPFILEHEADER2) + sizeof(BITMAPINFOHEADER2) + info_header.biSizeImage;
+        //printf("Total size: %ld\n", total_size);
+        uint8_t *bmp_buffer = (uint8_t *)malloc(total_size);
+        if (!bmp_buffer) {
+            fprintf(stderr, "Error: Could not allocate memory for BMP buffer.\n");
+            free(pixel_data);
+            return 1;
+        }
+        memcpy(bmp_buffer, &file_header, sizeof(BITMAPFILEHEADER2));
+        memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER2), &info_header, sizeof(BITMAPINFOHEADER2));
+        memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER2) + sizeof(BITMAPINFOHEADER2), pixel_data, info_header.biSizeImage);
+
+        if (send(client_socket, bmp_buffer, total_size, 0) == -1) {
+            perror("Error sending BMP data");
+            free(pixel_data);
+            free(bmp_buffer);
+            return 1;
+        }
+
+        free(pixel_data); // Free the allocated memory for pixel data
+        free(bmp_buffer); // Free the allocated memory for BMP buffer
+
+
+
+        return 0;
     }
 
-    fseek(file, bfHeader.offset, SEEK_SET);
-    unsigned int imgSize = biHeader.sizeImage == 0 ? (biHeader.width * 4 * abs(biHeader.height)) : biHeader.sizeImage;
-    unsigned char* imgData = (unsigned char*)malloc(imgSize);
+    fseek(input_file, file_header.bfOffBits, SEEK_SET);
+    uint8_t *pixel_data = (uint8_t *)malloc(info_header.biSizeImage);
+    if (!pixel_data) {
+        fprintf(stderr, "Error: Could not allocate memory for pixel data.\n");
+        fclose(input_file);
+        return 1;
+    }
+    fread(pixel_data, 1, info_header.biSizeImage, input_file);
+    //fclose(input_file);
 
-    fread(imgData, imgSize, 1, file);
-    invertColors32(imgData, imgSize);
+    uint32_t *pixels = (uint32_t *)pixel_data;
+    uint32_t pixel_count = info_header.biSizeImage / 4;
 
-    send(client_socket, imgData, imgSize, 0);
-    free(imgData);
+    for (uint32_t i = 0; i < pixel_count; i++) {
+        uint32_t pixel = pixels[i];
+        uint32_t red = (pixel & info_header.biRedMask);
+        uint32_t green = (pixel & info_header.biGreenMask);
+        uint32_t blue = (pixel & info_header.biBlueMask);
+        uint32_t alpha = (pixel & info_header.biAlphaMask);
+
+        red = invert_color(red, info_header.biRedMask);
+        green = invert_color(green, info_header.biGreenMask);
+        blue = invert_color(blue, info_header.biBlueMask);
+
+        pixels[i] = red | green | blue | alpha;
+    }
+
+    long total_size = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + info_header.biSizeImage;
+    uint8_t *bmp_buffer = (uint8_t *)malloc(total_size);
+    if (!bmp_buffer) {
+        fprintf(stderr, "Error: Could not allocate memory for BMP buffer.\n");
+        free(pixel_data);
+        return 1;
+    }
+
+    // Copy the headers and pixel data into the buffer
+    memcpy(bmp_buffer, &file_header, sizeof(BITMAPFILEHEADER));
+    memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER), &info_header, sizeof(BITMAPINFOHEADER));
+    memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER), pixel_data, info_header.biSizeImage);
+
+    // Send the entire BMP buffer to the client
+    if (send(client_socket, bmp_buffer, total_size, 0) == -1) {
+        perror("Error sending BMP data");
+        free(pixel_data);
+        free(bmp_buffer);
+        return 1;
+    }
+
+    free(pixel_data); // Free the allocated memory for pixel data
+    free(bmp_buffer); // Free the allocated memory for BMP buffer
+
+
+return 0;
 }
-
 // Function to handle JPEG files
 void handle_jpeg(int client_socket, FILE *file) {
+
     struct jpeg_decompress_struct cinfo;
     struct jpeg_error_mgr jerr;
 
@@ -176,8 +325,10 @@ void *handle_client(void *arg) {
     fseek(file, 0, SEEK_SET);  // Reset file pointer
 
     if (signature[0] == 0x42 && signature[1] == 0x4D) {
+        //printf("file size in bytes before calling handle_bmp: %ld\n", ftell(file));
         handle_bmp(client_socket, file);
     } else if (signature[0] == 0xFF && signature[1] == 0xD8) {
+        //printf("File size in bytes before calling handle_jpeg: %ld\n", ftell(file));
         handle_jpeg(client_socket, file);
     } else {
         const char *error_msg = "Unsupported file format";
