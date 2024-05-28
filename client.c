@@ -110,7 +110,28 @@ int main() {
         fclose(file);
         printf("File sent successfully.\n");
 
-        printf("\n\nBytes send: %lld\n\n", bytes_sent);
+        printf("\n\nBytes sent: %lld\n\n", bytes_sent);
+
+        // Prompt user for operation code
+        int operation_code;
+        printf("Select operation to perform:\n");
+        printf("1. Invert colors\n");
+        printf("2. Rotate 180 degrees\n");
+        printf("3. Convert to black/white\n");
+        printf("Enter operation code: ");
+        scanf("%d", &operation_code);
+
+        while(operation_code < 1 || operation_code > 3) {
+            printf("Invalid operation code. Please enter a valid operation code: \n");
+            scanf("%d", &operation_code);
+        }
+
+        // Send operation code to the server
+        if (send(client_socket, &operation_code, sizeof(operation_code), 0) < 0) {
+            perror("Failed to send operation code");
+            close(client_socket);
+            return 1;
+        }
 
         // Receive the processed file
         char output_filename[1024];

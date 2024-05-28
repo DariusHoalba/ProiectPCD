@@ -18,6 +18,7 @@
 uint32_t invert_color(uint32_t color, uint32_t mask) {
     return (~color) & mask;
 }
+
 typedef struct {
     uint16_t bfType;
     uint32_t bfSize;
@@ -65,28 +66,98 @@ typedef struct {
     uint32_t biBlueMask;
     uint32_t biAlphaMask;
 } BITMAPINFOHEADER;
+
 #pragma pack(pop)
 
-// Function to invert colors for 32-bit BMP images
-void invertColors32(unsigned char* img, unsigned int size) {
-    for (unsigned int i = 0; i < size; i += 4) { // Each pixel: B, G, R, A
+// Function to invert colors for BMP images
+void invert_bmp_colors(uint8_t *img, int size) {
+    for (unsigned int i = 0; i < size; i += 4) {
         img[i] = 255 - img[i];       // Blue
         img[i+1] = 255 - img[i+1];   // Green
         img[i+2] = 255 - img[i+2];   // Red
-        // Alpha channel (img[i+3]) is not modified
+    }
+}
+
+// Function to rotate BMP image 180 degrees
+void rotate_bmp_180(uint8_t *img, int width, int height) {
+    unsigned long img_size = width * height * 4; // 4 channels: BGRA
+    uint8_t *temp_img = (uint8_t *)malloc(img_size);
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width * 4; j += 4) {
+            int src_index = i * width * 4 + j;
+            int dest_index = (height - 1 - i) * width * 4 + (width * 4 - 4 - j);
+
+            temp_img[dest_index] = img[src_index];           // Blue
+            temp_img[dest_index + 1] = img[src_index + 1];   // Green
+            temp_img[dest_index + 2] = img[src_index + 2];   // Red
+            temp_img[dest_index + 3] = img[src_index + 3];   // Alpha
+        }
+    }
+
+    memcpy(img, temp_img, img_size);
+    free(temp_img);
+}
+
+
+// Function to convert BMP to black/white
+void convert_bmp_to_black_white(uint8_t *img, int width, int height) {
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width * 4; j += 4) {
+            unsigned char gray = 0.3 * img[i * width * 4 + j + 2] +
+                                 0.59 * img[i * width * 4 + j + 1] +
+                                 0.11 * img[i * width * 4 + j];
+            img[i * width * 4 + j] = gray;
+            img[i * width * 4 + j + 1] = gray;
+            img[i * width * 4 + j + 2] = gray;
+        }
     }
 }
 
 // Function to invert colors for JPEG images
-void invert_colors(unsigned char *img, unsigned long size) {
+void invert_jpeg_colors(unsigned char *img, unsigned long size) {
     for (unsigned long i = 0; i < size; i++) {
-        img[i] = 255 - img[i]; // Invert color
+        img[i] = 255 - img[i];
     }
 }
 
+// Function to rotate JPEG image 180 degrees
+void rotate_jpeg_180(unsigned char *img, int width, int height, int channels) {
+    unsigned long img_size = width * height * channels;
+    unsigned char *temp_img = (unsigned char *)malloc(img_size);
 
-int handle_bmp(int client_socket, FILE *input_file) {
-    //printf("File size in bytes: %ld\n", ftell(input_file));
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width * channels; j += channels) {
+            int src_index = i * width * channels + j;
+            int dest_index = (height - 1 - i) * width * channels + (width * channels - channels - j);
+
+            for (int k = 0; k < channels; k++) {
+                temp_img[dest_index + k] = img[src_index + k];
+            }
+        }
+    }
+
+    memcpy(img, temp_img, img_size);
+    free(temp_img);
+}
+
+
+// Function to convert JPEG to black/white
+void convert_jpeg_to_black_white(unsigned char *img, int width, int height, int channels) {
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width * channels; j += channels) {
+            unsigned char gray = 0.3 * img[i * width * channels + j + 2] +
+                                 0.59 * img[i * width * channels + j + 1] +
+                                 0.11 * img[i * width * channels + j];
+            for (int k = 0; k < channels; k++) {
+                img[i * width * channels + j + k] = gray;
+            }
+        }
+    }
+}
+
+// Process BMP image
+int process_bmp(int client_socket, FILE *input_file, int operation) {
     BITMAPFILEHEADER file_header;
     fread(&file_header, sizeof(BITMAPFILEHEADER), 1, input_file);
     if (file_header.bfType != 0x4D42) {
@@ -102,72 +173,6 @@ int handle_bmp(int client_socket, FILE *input_file) {
         fclose(input_file);
         return 1;
     }
-    if (info_header.biCompression != 3) {
-
-
-        fprintf(stderr, "[LOG]: BMP without BITFIELDS\n");
-        BITMAPFILEHEADER2 file_header;
-        fseek(input_file, 0, SEEK_SET);
-        fread(&file_header, sizeof(BITMAPFILEHEADER2), 1, input_file);
-
-        if (file_header.bfType != 0x4D42) {
-            fprintf(stderr, "Error: Not a valid BMP file.\n");
-            //fclose(input_file);
-            return 1;
-        }
-
-        BITMAPINFOHEADER2 info_header;
-        fread(&info_header, sizeof(BITMAPINFOHEADER2), 1, input_file);
-
-        if (info_header.biBitCount != 32) {
-            fprintf(stderr, "Error: Only 32-bit BMP files are supported.\n");
-            //fclose(input_file);
-            return 1;
-        }
-
-        fseek(input_file, file_header.bfOffBits, SEEK_SET);
-
-        uint8_t *pixel_data = (uint8_t *)malloc(info_header.biSizeImage);
-        if (!pixel_data) {
-            fprintf(stderr, "Error: Could not allocate memory for pixel data.\n");
-            //fclose(input_file);
-            return 1;
-        }
-
-
-        fread(pixel_data, 1, info_header.biSizeImage, input_file);
-        //fclose(input_file);
-
-        invert_colors(pixel_data, info_header.biSizeImage);
-
-
-        /// send the data to the client
-        long total_size = sizeof(BITMAPFILEHEADER2) + sizeof(BITMAPINFOHEADER2) + info_header.biSizeImage;
-        //printf("Total size: %ld\n", total_size);
-        uint8_t *bmp_buffer = (uint8_t *)malloc(total_size);
-        if (!bmp_buffer) {
-            fprintf(stderr, "Error: Could not allocate memory for BMP buffer.\n");
-            free(pixel_data);
-            return 1;
-        }
-        memcpy(bmp_buffer, &file_header, sizeof(BITMAPFILEHEADER2));
-        memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER2), &info_header, sizeof(BITMAPINFOHEADER2));
-        memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER2) + sizeof(BITMAPINFOHEADER2), pixel_data, info_header.biSizeImage);
-
-        if (send(client_socket, bmp_buffer, total_size, 0) == -1) {
-            perror("Error sending BMP data");
-            free(pixel_data);
-            free(bmp_buffer);
-            return 1;
-        }
-
-        free(pixel_data); // Free the allocated memory for pixel data
-        free(bmp_buffer); // Free the allocated memory for BMP buffer
-
-
-
-        return 0;
-    }
 
     fseek(input_file, file_header.bfOffBits, SEEK_SET);
     uint8_t *pixel_data = (uint8_t *)malloc(info_header.biSizeImage);
@@ -177,23 +182,22 @@ int handle_bmp(int client_socket, FILE *input_file) {
         return 1;
     }
     fread(pixel_data, 1, info_header.biSizeImage, input_file);
-    //fclose(input_file);
 
-    uint32_t *pixels = (uint32_t *)pixel_data;
-    uint32_t pixel_count = info_header.biSizeImage / 4;
-
-    for (uint32_t i = 0; i < pixel_count; i++) {
-        uint32_t pixel = pixels[i];
-        uint32_t red = (pixel & info_header.biRedMask);
-        uint32_t green = (pixel & info_header.biGreenMask);
-        uint32_t blue = (pixel & info_header.biBlueMask);
-        uint32_t alpha = (pixel & info_header.biAlphaMask);
-
-        red = invert_color(red, info_header.biRedMask);
-        green = invert_color(green, info_header.biGreenMask);
-        blue = invert_color(blue, info_header.biBlueMask);
-
-        pixels[i] = red | green | blue | alpha;
+    switch (operation) {
+        case 1:
+            invert_bmp_colors(pixel_data, info_header.biSizeImage);
+            break;
+        case 2:
+            rotate_bmp_180(pixel_data, info_header.biWidth, info_header.biHeight);
+            break;
+        case 3:
+            convert_bmp_to_black_white(pixel_data, info_header.biWidth, info_header.biHeight);
+            break;
+        default:
+            fprintf(stderr, "Error: Invalid operation code.\n");
+            free(pixel_data);
+            fclose(input_file);
+            return 1;
     }
 
     long total_size = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + info_header.biSizeImage;
@@ -204,12 +208,10 @@ int handle_bmp(int client_socket, FILE *input_file) {
         return 1;
     }
 
-    // Copy the headers and pixel data into the buffer
     memcpy(bmp_buffer, &file_header, sizeof(BITMAPFILEHEADER));
     memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER), &info_header, sizeof(BITMAPINFOHEADER));
     memcpy(bmp_buffer + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER), pixel_data, info_header.biSizeImage);
 
-    // Send the entire BMP buffer to the client
     if (send(client_socket, bmp_buffer, total_size, 0) == -1) {
         perror("Error sending BMP data");
         free(pixel_data);
@@ -217,19 +219,15 @@ int handle_bmp(int client_socket, FILE *input_file) {
         return 1;
     }
 
-    free(pixel_data); // Free the allocated memory for pixel data
-    free(bmp_buffer); // Free the allocated memory for BMP buffer
-
-
-return 0;
+    free(pixel_data);
+    free(bmp_buffer);
+    return 0;
 }
-// Function to handle JPEG files
-void handle_jpeg(int client_socket, FILE *file) {
 
+// Handle JPEG image
+void handle_jpeg(int client_socket, FILE *file, int operation) {
     struct jpeg_decompress_struct cinfo;
     struct jpeg_error_mgr jerr;
-
-    printf("%s \n", "Handling jpeg");
 
     cinfo.err = jpeg_std_error(&jerr);
     jpeg_create_decompress(&cinfo);
@@ -250,12 +248,26 @@ void handle_jpeg(int client_socket, FILE *file) {
         jpeg_read_scanlines(&cinfo, buffer_array, 1);
     }
 
-    invert_colors(img_data, img_size);
+    switch (operation) {
+        case 1:
+            invert_jpeg_colors(img_data, img_size);
+            break;
+        case 2:
+            rotate_jpeg_180(img_data, width, height, pixel_size);
+            break;
+        case 3:
+            convert_jpeg_to_black_white(img_data, width, height, pixel_size);
+            break;
+        default:
+            fprintf(stderr, "Error: Invalid operation code.\n");
+            free(img_data);
+            fclose(file);
+            return;
+    }
 
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
 
-    // Compress the image back to JPEG format
     struct jpeg_compress_struct cinfo_out;
     struct jpeg_error_mgr jerr_out;
     cinfo_out.err = jpeg_std_error(&jerr_out);
@@ -271,7 +283,7 @@ void handle_jpeg(int client_socket, FILE *file) {
     cinfo_out.in_color_space = cinfo.out_color_space;
 
     jpeg_set_defaults(&cinfo_out);
-    jpeg_set_quality(&cinfo_out, 90, TRUE);  // Set quality to 90 to reduce data loss
+    jpeg_set_quality(&cinfo_out, 90, TRUE);
     jpeg_start_compress(&cinfo_out, TRUE);
 
     while (cinfo_out.next_scanline < cinfo_out.image_height) {
@@ -285,14 +297,14 @@ void handle_jpeg(int client_socket, FILE *file) {
 
     free(img_data);
 
-    // Send the compressed JPEG image back to the client
     send(client_socket, jpeg_buffer, jpeg_size, 0);
     free(jpeg_buffer);
 }
 
+// Handle client connection
 void *handle_client(void *arg) {
     int client_socket = *((int*)arg);
-    free(arg);  // Free the socket pointer memory
+    free(arg);
     char buffer[BUFFER_SIZE];
     int bytes_read;
 
@@ -306,9 +318,7 @@ void *handle_client(void *arg) {
 
     long long total_bytes = 0;
     while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-        // Check if the end signal is in the received data
         if (bytes_read >= strlen(END_SIGNAL) && strncmp(buffer + bytes_read - strlen(END_SIGNAL), END_SIGNAL, strlen(END_SIGNAL)) == 0) {
-            // Write data excluding the end signal
             fwrite(buffer, 1, bytes_read - strlen(END_SIGNAL), file);
             total_bytes += bytes_read - strlen(END_SIGNAL);
             break;
@@ -324,12 +334,18 @@ void *handle_client(void *arg) {
     fread(signature, 1, 2, file);
     fseek(file, 0, SEEK_SET);  // Reset file pointer
 
+    int operation_code;
+    if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
+        perror("Failed to receive operation code");
+        fclose(file);
+        close(client_socket);
+        return NULL;
+    }
+
     if (signature[0] == 0x42 && signature[1] == 0x4D) {
-        //printf("file size in bytes before calling handle_bmp: %ld\n", ftell(file));
-        handle_bmp(client_socket, file);
+        process_bmp(client_socket, file, operation_code);
     } else if (signature[0] == 0xFF && signature[1] == 0xD8) {
-        //printf("File size in bytes before calling handle_jpeg: %ld\n", ftell(file));
-        handle_jpeg(client_socket, file);
+        handle_jpeg(client_socket, file, operation_code);
     } else {
         const char *error_msg = "Unsupported file format";
         send(client_socket, error_msg, strlen(error_msg), 0);
@@ -341,7 +357,7 @@ void *handle_client(void *arg) {
     return NULL;
 }
 
-
+// Main server function
 int main() {
     int server_socket, *new_sock;
     struct sockaddr_in server_addr, client_addr;
