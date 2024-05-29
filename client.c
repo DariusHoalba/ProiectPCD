@@ -65,14 +65,14 @@ int main() {
     printf("Connected to server. Enter file paths to send (Type 'done' to finish):\n");
 
     char filepath[1024];
-    while (1) {
+    while (1) {  // Loop to keep the client open
         printf("Enter file path: ");
         scanf("%1023s", filepath);
 
         if (strcmp(filepath, "done") == 0) {
             // Send the done signal to the server
             send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
-            break;
+            break;  // Exit the loop and close the socket after finishing all operations
         }
 
         // Check if the path is a directory
@@ -116,12 +116,14 @@ int main() {
         int operation_code;
         printf("Select operation to perform:\n");
         printf("1. Invert colors\n");
-        printf("2. Rotate 180 degrees\n");
-        printf("3. Convert to black/white\n");
+        printf("2. Rotate 90 degrees\n");
+        printf("3. Rotate 180 degrees\n");
+        printf("4. Rotate 270 degrees\n");
+        printf("5. Convert to black/white\n");
         printf("Enter operation code: ");
         scanf("%d", &operation_code);
 
-        while(operation_code < 1 || operation_code > 3) {
+        while(operation_code < 1 || operation_code > 5) {
             printf("Invalid operation code. Please enter a valid operation code: \n");
             scanf("%d", &operation_code);
         }
@@ -146,8 +148,8 @@ int main() {
         printf("Receiving data...\n");
         int bytes_received;
         while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-            printf("%s %d\n", "Bytes received: ", bytes_received);
-            if (strncmp(buffer, END_SIGNAL, END_SIGNAL_LEN) == 0) {
+            if (bytes_received >= END_SIGNAL_LEN && strncmp(buffer + bytes_received - END_SIGNAL_LEN, END_SIGNAL, END_SIGNAL_LEN) == 0) {
+                fwrite(buffer, 1, bytes_received - END_SIGNAL_LEN, output_file);
                 break;
             }
             fwrite(buffer, 1, bytes_received, output_file);
@@ -157,7 +159,7 @@ int main() {
         printf("Processed file received and saved as %s.\n", output_filename);
     }
 
-    // Close socket
+    // Close socket only once after finishing all operations
     close(client_socket);
     printf("Disconnected from server.\n");
 
