@@ -78,6 +78,30 @@ void invert_bmp_colors(uint8_t *img, int size) {
     }
 }
 
+
+// Function to rotate BMP image 90 degrees
+void rotate_bmp_90(uint8_t *img, int width, int height) {
+    unsigned long img_size = width * height * 4; // 4 channels: BGRA
+    uint8_t *temp_img = (uint8_t *)malloc(img_size);
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int src_index = i * width * 4 + j * 4;
+            int dest_index = j * height * 4 + (height - 1 - i) * 4;
+
+            temp_img[dest_index] = img[src_index];           // Blue
+            temp_img[dest_index + 1] = img[src_index + 1];   // Green
+            temp_img[dest_index + 2] = img[src_index + 2];   // Red
+            temp_img[dest_index + 3] = img[src_index + 3];   // Alpha
+        }
+    }
+
+    memcpy(img, temp_img, img_size);
+    free(temp_img);
+}
+
+
+
 // Function to rotate BMP image 180 degrees
 void rotate_bmp_180(uint8_t *img, int width, int height) {
     unsigned long img_size = width * height * 4; // 4 channels: BGRA
@@ -87,6 +111,28 @@ void rotate_bmp_180(uint8_t *img, int width, int height) {
         for (int j = 0; j < width * 4; j += 4) {
             int src_index = i * width * 4 + j;
             int dest_index = (height - 1 - i) * width * 4 + (width * 4 - 4 - j);
+
+            temp_img[dest_index] = img[src_index];           // Blue
+            temp_img[dest_index + 1] = img[src_index + 1];   // Green
+            temp_img[dest_index + 2] = img[src_index + 2];   // Red
+            temp_img[dest_index + 3] = img[src_index + 3];   // Alpha
+        }
+    }
+
+    memcpy(img, temp_img, img_size);
+    free(temp_img);
+}
+
+
+// Function to rotate BMP image 270 degrees
+void rotate_bmp_270(uint8_t *img, int width, int height) {
+    unsigned long img_size = width * height * 4; // 4 channels: BGRA
+    uint8_t *temp_img = (uint8_t *)malloc(img_size);
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int src_index = i * width * 4 + j * 4;
+            int dest_index = (width - 1 - j) * height * 4 + i * 4;
 
             temp_img[dest_index] = img[src_index];           // Blue
             temp_img[dest_index + 1] = img[src_index + 1];   // Green
@@ -121,6 +167,27 @@ void invert_jpeg_colors(unsigned char *img, unsigned long size) {
     }
 }
 
+// Function to rotate JPEG image 90 degrees
+void rotate_jpeg_90(unsigned char *img, int width, int height, int channels) {
+    unsigned long img_size = width * height * channels;
+    unsigned char *temp_img = (unsigned char *)malloc(img_size);
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int src_index = i * width * channels + j * channels;
+            int dest_index = j * height * channels + (height - 1 - i) * channels;
+
+            for (int k = 0; k < channels; k++) {
+                temp_img[dest_index + k] = img[src_index + k];
+            }
+        }
+    }
+
+    memcpy(img, temp_img, img_size);
+    free(temp_img);
+}
+
+
 // Function to rotate JPEG image 180 degrees
 void rotate_jpeg_180(unsigned char *img, int width, int height, int channels) {
     unsigned long img_size = width * height * channels;
@@ -130,6 +197,26 @@ void rotate_jpeg_180(unsigned char *img, int width, int height, int channels) {
         for (int j = 0; j < width * channels; j += channels) {
             int src_index = i * width * channels + j;
             int dest_index = (height - 1 - i) * width * channels + (width * channels - channels - j);
+
+            for (int k = 0; k < channels; k++) {
+                temp_img[dest_index + k] = img[src_index + k];
+            }
+        }
+    }
+
+    memcpy(img, temp_img, img_size);
+    free(temp_img);
+}
+
+// Function to rotate JPEG image 270 degrees
+void rotate_jpeg_270(unsigned char *img, int width, int height, int channels) {
+    unsigned long img_size = width * height * channels;
+    unsigned char *temp_img = (unsigned char *)malloc(img_size);
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int src_index = i * width * channels + j * channels;
+            int dest_index = (width - 1 - j) * height * channels + i * channels;
 
             for (int k = 0; k < channels; k++) {
                 temp_img[dest_index + k] = img[src_index + k];
@@ -155,6 +242,7 @@ void convert_jpeg_to_black_white(unsigned char *img, int width, int height, int 
         }
     }
 }
+
 
 // Process BMP image
 int process_bmp(int client_socket, FILE *input_file, int operation) {
@@ -188,9 +276,25 @@ int process_bmp(int client_socket, FILE *input_file, int operation) {
             invert_bmp_colors(pixel_data, info_header.biSizeImage);
             break;
         case 2:
-            rotate_bmp_180(pixel_data, info_header.biWidth, info_header.biHeight);
+            rotate_bmp_90(pixel_data, info_header.biWidth, info_header.biHeight);
+            {
+                int temp = info_header.biWidth;
+                info_header.biWidth = info_header.biHeight;
+                info_header.biHeight = temp;
+            }
             break;
         case 3:
+            rotate_bmp_180(pixel_data, info_header.biWidth, info_header.biHeight);
+            break;
+        case 4:
+            rotate_bmp_270(pixel_data, info_header.biWidth, info_header.biHeight);
+            {
+                int temp = info_header.biWidth;
+                info_header.biWidth = info_header.biHeight;
+                info_header.biHeight = temp;
+            }
+            break;
+        case 5:
             convert_bmp_to_black_white(pixel_data, info_header.biWidth, info_header.biHeight);
             break;
         default:
@@ -214,6 +318,14 @@ int process_bmp(int client_socket, FILE *input_file, int operation) {
 
     if (send(client_socket, bmp_buffer, total_size, 0) == -1) {
         perror("Error sending BMP data");
+        free(pixel_data);
+        free(bmp_buffer);
+        return 1;
+    }
+
+    // Send END_SIGNAL to indicate the end of file transmission
+    if (send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0) == -1) {
+        perror("Error sending END_SIGNAL");
         free(pixel_data);
         free(bmp_buffer);
         return 1;
@@ -253,9 +365,25 @@ void handle_jpeg(int client_socket, FILE *file, int operation) {
             invert_jpeg_colors(img_data, img_size);
             break;
         case 2:
-            rotate_jpeg_180(img_data, width, height, pixel_size);
+            rotate_jpeg_90(img_data, width, height, pixel_size);
+            {
+                int temp = width;
+                width = height;
+                height = temp;
+            }
             break;
         case 3:
+            rotate_jpeg_180(img_data, width, height, pixel_size);
+            break;
+        case 4:
+            rotate_jpeg_270(img_data, width, height, pixel_size);
+            {
+                int temp = width;
+                width = height;
+                height = temp;
+            }
+            break;
+        case 5:
             convert_jpeg_to_black_white(img_data, width, height, pixel_size);
             break;
         default:
@@ -297,9 +425,18 @@ void handle_jpeg(int client_socket, FILE *file, int operation) {
 
     free(img_data);
 
+    // Send the processed image data to the client
     send(client_socket, jpeg_buffer, jpeg_size, 0);
+
+    // Send END_SIGNAL to indicate the end of file transmission
+    if (send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0) == -1) {
+        perror("Error sending END_SIGNAL");
+    }
+
     free(jpeg_buffer);
 }
+
+
 
 // Handle client connection
 void *handle_client(void *arg) {
@@ -308,53 +445,62 @@ void *handle_client(void *arg) {
     char buffer[BUFFER_SIZE];
     int bytes_read;
 
-    // Create a temporary file to store received data
-    FILE *file = tmpfile();
-    if (!file) {
-        perror("Failed to create temporary file");
-        close(client_socket);
-        return NULL;
-    }
-
-    long long total_bytes = 0;
-    while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-        if (bytes_read >= strlen(END_SIGNAL) && strncmp(buffer + bytes_read - strlen(END_SIGNAL), END_SIGNAL, strlen(END_SIGNAL)) == 0) {
-            fwrite(buffer, 1, bytes_read - strlen(END_SIGNAL), file);
-            total_bytes += bytes_read - strlen(END_SIGNAL);
-            break;
+    while (1) {  // Keep the connection open for multiple operations
+        // Create a temporary file to store received data
+        FILE *file = tmpfile();
+        if (!file) {
+            perror("Failed to create temporary file");
+            close(client_socket);
+            return NULL;
         }
-        fwrite(buffer, 1, bytes_read, file);
-        total_bytes += bytes_read;
-    }
 
-    printf("\n\nTotal bytes: %lld\n\n", total_bytes);
-    fseek(file, 0, SEEK_SET);
+        long long total_bytes = 0;
+        while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
+            if (bytes_read >= strlen(END_SIGNAL) && strncmp(buffer + bytes_read - strlen(END_SIGNAL), END_SIGNAL, strlen(END_SIGNAL)) == 0) {
+                fwrite(buffer, 1, bytes_read - strlen(END_SIGNAL), file);
+                total_bytes += bytes_read - strlen(END_SIGNAL);
+                break;
+            }
+            fwrite(buffer, 1, bytes_read, file);
+            total_bytes += bytes_read;
+        }
 
-    unsigned char signature[2];
-    fread(signature, 1, 2, file);
-    fseek(file, 0, SEEK_SET);  // Reset file pointer
+        printf("\n\nTotal bytes: %lld\n\n", total_bytes);
+        fseek(file, 0, SEEK_SET);
 
-    int operation_code;
-    if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
-        perror("Failed to receive operation code");
+        if(total_bytes == 0) {
+            printf("Client disconnected.\n");
+            fclose(file);
+            close(client_socket);
+            return NULL;
+        }
+
+        unsigned char signature[2];
+        fread(signature, 1, 2, file);
+        fseek(file, 0, SEEK_SET);  // Reset file pointer
+
+        int operation_code;
+        if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
+            perror("Failed to receive operation code");
+            fclose(file);
+            close(client_socket);
+            return NULL;
+        }
+
+        if (signature[0] == 0x42 && signature[1] == 0x4D) {
+            process_bmp(client_socket, file, operation_code);
+        } else if (signature[0] == 0xFF && signature[1] == 0xD8) {
+            handle_jpeg(client_socket, file, operation_code);
+        } else {
+            const char *error_msg = "Unsupported file format";
+            send(client_socket, error_msg, strlen(error_msg), 0);
+        }
+
         fclose(file);
-        close(client_socket);
-        return NULL;
-    }
 
-    if (signature[0] == 0x42 && signature[1] == 0x4D) {
-        process_bmp(client_socket, file, operation_code);
-    } else if (signature[0] == 0xFF && signature[1] == 0xD8) {
-        handle_jpeg(client_socket, file, operation_code);
-    } else {
-        const char *error_msg = "Unsupported file format";
-        send(client_socket, error_msg, strlen(error_msg), 0);
+        // Continue to next operation without closing the socket
+        printf("Ready for next operation.\n");
     }
-
-    fclose(file);
-    close(client_socket);
-    printf("Client connection closed.\n");
-    return NULL;
 }
 
 // Main server function
