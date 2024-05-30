@@ -76,7 +76,6 @@ typedef struct
 
 #pragma pack(pop)
 
-// Function to invert colors for BMP images
 void invert_bmp_colors(uint8_t *img, int size) {
     for (unsigned int i = 0; i < size; i += 4) {
         img[i] = 255 - img[i];       // Blue
@@ -84,7 +83,7 @@ void invert_bmp_colors(uint8_t *img, int size) {
         img[i+2] = 255 - img[i+2];   // Red
     }
 }
-// Function to invert colors for png images
+
 void invert_png_colors(png_bytep *row_pointers, int width, int height, int channels)
 {
     for (int y = 0; y < height; y++)
@@ -464,8 +463,6 @@ int process_bmp(int client_socket, FILE *input_file, int operation)
         free(bmp_buffer);
         return 1;
     }
-
-    // Send END_SIGNAL to indicate the end of file transmission
     if (send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0) == -1)
     {
         perror("Error sending END_SIGNAL");
@@ -476,10 +473,12 @@ int process_bmp(int client_socket, FILE *input_file, int operation)
 
     free(pixel_data);
     free(bmp_buffer);
+
+    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
+
     return 0;
 }
 
-// Handle png image
 void handle_png(int client_socket, FILE *file, int operation)
 {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -577,7 +576,6 @@ void handle_png(int client_socket, FILE *file, int operation)
 
     png_destroy_read_struct(&png, &info, NULL);
 
-    // Prepare to write the processed PNG back to the client
     png_structp png_out = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png_out)
     {
@@ -634,14 +632,14 @@ void handle_png(int client_socket, FILE *file, int operation)
     send(client_socket, png_buffer, png_size, 0);
     free(png_buffer);
 
-    // Send END_SIGNAL to indicate the end of file transmission
     if (send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0) == -1)
     {
         perror("Error sending END_SIGNAL");
     }
+
+    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
 }
 
-// Handle JPEG image
 void handle_jpeg(int client_socket, FILE *file, int operation)
 {
     struct jpeg_decompress_struct cinfo;
@@ -734,19 +732,18 @@ void handle_jpeg(int client_socket, FILE *file, int operation)
 
     free(img_data);
 
-    // Send the processed image data to the client
     send(client_socket, jpeg_buffer, jpeg_size, 0);
 
-    // Send END_SIGNAL to indicate the end of file transmission
     if (send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0) == -1)
     {
         perror("Error sending END_SIGNAL");
     }
 
     free(jpeg_buffer);
+
+    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
 }
 
-// Handle client connection
 void *handle_client(void *arg)
 {
     int client_socket = *((int *)arg);
@@ -755,8 +752,7 @@ void *handle_client(void *arg)
     int bytes_read;
 
     while (1)
-    { // Keep the connection open for multiple operations
-        // Create a temporary file to store received data
+    {
         FILE *file = tmpfile();
         if (!file)
         {
@@ -788,6 +784,10 @@ void *handle_client(void *arg)
             close(client_socket);
             return NULL;
         }
+
+        // Send a confirmation message to the client
+        const char *confirmation = "File received";
+        send(client_socket, confirmation, strlen(confirmation), 0);
 
         unsigned char signature[2];
         fread(signature, 1, 2, file);
@@ -821,13 +821,10 @@ void *handle_client(void *arg)
         }
 
         fclose(file);
-
-        // Continue to next operation without closing the socket
         printf("Ready for next operation.\n");
     }
 }
 
-// Main server function
 int main()
 {
     int server_socket, *new_sock;
