@@ -30,7 +30,7 @@ int is_valid_extension(const char *filename) {
     if (!dot) {
         return 0;
     }
-    if (strcmp(dot, ".jpeg") == 0 || strcmp(dot, ".jpg") == 0 || strcmp(dot, ".bmp") == 0) {
+    if (strcmp(dot, ".jpeg") == 0 || strcmp(dot, ".jpg") == 0 || strcmp(dot, ".bmp") == 0 || strcmp(dot, ".png") == 0) {
         return 1;
     }
     return 0;
@@ -83,7 +83,7 @@ int main() {
 
         // Check if the file has a valid extension
         if (!is_valid_extension(filepath)) {
-            printf("Invalid file type. Only .jpeg, .jpg, and .bmp files are allowed.\n");
+            printf("Invalid file type. Only .jpeg, .jpg, .bmp and png files are allowed.\n");
             continue;  // Prompt for another file path
         }
 
