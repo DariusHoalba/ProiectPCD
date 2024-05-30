@@ -163,18 +163,33 @@ int main() {
         }
 
         int operation_code;
-        printf("Select operation to perform on all files in the directory:\n");
-        printf("1. Invert colors\n");
-        printf("2. Rotate 90 degrees\n");
-        printf("3. Rotate 180 degrees\n");
-        printf("4. Rotate 270 degrees\n");
-        printf("5. Convert to black/white\n");
-        printf("Enter operation code: ");
-        scanf("%d", &operation_code);
+        char input_buffer[10];
 
-        while (operation_code < 1 || operation_code > 5) {
-            printf("Invalid operation code. Please enter a valid operation code: \n");
-            scanf("%d", &operation_code);
+        while (1) {
+            printf("Select operation to perform on all files in the directory:\n");
+            printf("1. Invert colors\n");
+            printf("2. Rotate 90 degrees\n");
+            printf("3. Rotate 180 degrees\n");
+            printf("4. Rotate 270 degrees\n");
+            printf("5. Convert to black/white\n");
+            printf("Enter operation code (or 'done' to finish): ");
+            scanf("%s", input_buffer);
+
+            if (strcmp(input_buffer, "done") == 0) {
+                break;
+            }
+
+            char *endptr;
+            operation_code = strtol(input_buffer, &endptr, 10);
+            if (*endptr == '\0' && operation_code >= 1 && operation_code <= 5) {
+                break;
+            } else {
+                printf("Invalid operation code. Please enter a valid operation code (1-5) or 'done' to finish.\n");
+            }
+        }
+
+        if (strcmp(input_buffer, "done") == 0) {
+            break;
         }
 
         process_files_in_directory(client_socket, directory_path, operation_code);

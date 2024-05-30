@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +14,10 @@
 #define PORT 12345
 #define END_SIGNAL "done"
 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
 #pragma pack(push, 1)
+
 
 uint32_t invert_color(uint32_t color, uint32_t mask)
 {
@@ -378,7 +380,6 @@ void convert_jpeg_to_black_white(unsigned char *img, int width, int height, int 
     }
 }
 
-// Process BMP image
 int process_bmp(int client_socket, FILE *input_file, int operation)
 {
     BITMAPFILEHEADER file_header;
@@ -411,36 +412,48 @@ int process_bmp(int client_socket, FILE *input_file, int operation)
 
     switch (operation)
     {
-    case 1:
-        invert_bmp_colors(pixel_data, info_header.biSizeImage);
-        break;
-    case 2:
-        rotate_bmp_90(pixel_data, info_header.biWidth, info_header.biHeight);
-        {
-            int temp = info_header.biWidth;
-            info_header.biWidth = info_header.biHeight;
-            info_header.biHeight = temp;
-        }
-        break;
-    case 3:
-        rotate_bmp_180(pixel_data, info_header.biWidth, info_header.biHeight);
-        break;
-    case 4:
-        rotate_bmp_270(pixel_data, info_header.biWidth, info_header.biHeight);
-        {
-            int temp = info_header.biWidth;
-            info_header.biWidth = info_header.biHeight;
-            info_header.biHeight = temp;
-        }
-        break;
-    case 5:
-        convert_bmp_to_black_white(pixel_data, info_header.biWidth, info_header.biHeight);
-        break;
-    default:
-        fprintf(stderr, "Error: Invalid operation code.\n");
-        free(pixel_data);
-        fclose(input_file);
-        return 1;
+        case 1:
+            invert_bmp_colors(pixel_data, info_header.biSizeImage);
+            break;
+        case 2:
+            rotate_bmp_90(pixel_data, info_header.biWidth, info_header.biHeight);
+            {
+                int temp = info_header.biWidth;
+                info_header.biWidth = info_header.biHeight;
+                info_header.biHeight = temp;
+            }
+            rotate_bmp_90(pixel_data, info_header.biWidth, info_header.biHeight);
+            {
+                int temp = info_header.biWidth;
+                info_header.biWidth = info_header.biHeight;
+                info_header.biHeight = temp;
+            }
+            rotate_bmp_90(pixel_data, info_header.biWidth, info_header.biHeight);
+            {
+                int temp = info_header.biWidth;
+                info_header.biWidth = info_header.biHeight;
+                info_header.biHeight = temp;
+            }
+            break;
+        case 3:
+            rotate_bmp_180(pixel_data, info_header.biWidth, info_header.biHeight);
+            break;
+        case 4:
+            rotate_bmp_270(pixel_data, info_header.biWidth, info_header.biHeight);
+            {
+                int temp = info_header.biWidth;
+                info_header.biWidth = info_header.biHeight;
+                info_header.biHeight = temp;
+            }
+            break;
+        case 5:
+            convert_bmp_to_black_white(pixel_data, info_header.biWidth, info_header.biHeight);
+            break;
+        default:
+            fprintf(stderr, "Error: Invalid operation code.\n");
+            free(pixel_data);
+            fclose(input_file);
+            return 1;
     }
 
     long total_size = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + info_header.biSizeImage;
@@ -463,6 +476,7 @@ int process_bmp(int client_socket, FILE *input_file, int operation)
         free(bmp_buffer);
         return 1;
     }
+
     if (send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0) == -1)
     {
         perror("Error sending END_SIGNAL");
@@ -473,8 +487,6 @@ int process_bmp(int client_socket, FILE *input_file, int operation)
 
     free(pixel_data);
     free(bmp_buffer);
-
-    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
 
     return 0;
 }
@@ -544,25 +556,25 @@ void handle_png(int client_socket, FILE *file, int operation)
     {
         case 1:
             invert_png_colors(row_pointers, width, height, channels);
-        break;
+            break;
         case 2:
             rotate_png_90(row_pointers, width, height, channels);
             temp = width;
             width = height;
             height = temp;
-        break;
+            break;
         case 3:
             rotate_png_180(row_pointers, width, height, channels);
-        break;
+            break;
         case 4:
             rotate_png_270(row_pointers, width, height, channels);
             temp = width;
             width = height;
             height = temp;
-        break;
+            break;
         case 5:
             convert_png_to_black_white(row_pointers, width, height, channels);
-        break;
+            break;
         default:
             fprintf(stderr, "Error: Invalid operation code for PNG.\n");
             for (int y = 0; y < height; y++)
@@ -628,7 +640,6 @@ void handle_png(int client_socket, FILE *file, int operation)
     }
     free(row_pointers);
 
-    // Send the processed PNG image data to the client
     send(client_socket, png_buffer, png_size, 0);
     free(png_buffer);
 
@@ -636,8 +647,6 @@ void handle_png(int client_socket, FILE *file, int operation)
     {
         perror("Error sending END_SIGNAL");
     }
-
-    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
 }
 
 void handle_jpeg(int client_socket, FILE *file, int operation)
@@ -667,36 +676,36 @@ void handle_jpeg(int client_socket, FILE *file, int operation)
 
     switch (operation)
     {
-    case 1:
-        invert_jpeg_colors(img_data, img_size);
-        break;
-    case 2:
-        rotate_jpeg_90(img_data, width, height, pixel_size);
-        {
-            int temp = width;
-            width = height;
-            height = temp;
-        }
-        break;
-    case 3:
-        rotate_jpeg_180(img_data, width, height, pixel_size);
-        break;
-    case 4:
-        rotate_jpeg_270(img_data, width, height, pixel_size);
-        {
-            int temp = width;
-            width = height;
-            height = temp;
-        }
-        break;
-    case 5:
-        convert_jpeg_to_black_white(img_data, width, height, pixel_size);
-        break;
-    default:
-        fprintf(stderr, "Error: Invalid operation code.\n");
-        free(img_data);
-        fclose(file);
-        return;
+        case 1:
+            invert_jpeg_colors(img_data, img_size);
+            break;
+        case 2:
+            rotate_jpeg_90(img_data, width, height, pixel_size);
+            {
+                int temp = width;
+                width = height;
+                height = temp;
+            }
+            break;
+        case 3:
+            rotate_jpeg_180(img_data, width, height, pixel_size);
+            break;
+        case 4:
+            rotate_jpeg_270(img_data, width, height, pixel_size);
+            {
+                int temp = width;
+                width = height;
+                height = temp;
+            }
+            break;
+        case 5:
+            convert_jpeg_to_black_white(img_data, width, height, pixel_size);
+            break;
+        default:
+            fprintf(stderr, "Error: Invalid operation code.\n");
+            free(img_data);
+            fclose(file);
+            return;
     }
 
     jpeg_finish_decompress(&cinfo);
@@ -740,8 +749,6 @@ void handle_jpeg(int client_socket, FILE *file, int operation)
     }
 
     free(jpeg_buffer);
-
-    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
 }
 
 void *handle_client(void *arg)
@@ -784,14 +791,12 @@ void *handle_client(void *arg)
             close(client_socket);
             return NULL;
         }
-
-        // Send a confirmation message to the client
         const char *confirmation = "File received";
         send(client_socket, confirmation, strlen(confirmation), 0);
 
         unsigned char signature[2];
         fread(signature, 1, 2, file);
-        fseek(file, 0, SEEK_SET); // Reset file pointer
+        fseek(file, 0, SEEK_SET);
 
         int operation_code;
         if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0)
@@ -802,6 +807,7 @@ void *handle_client(void *arg)
             return NULL;
         }
 
+        pthread_mutex_lock(&lock);
         if (signature[0] == 0x42 && signature[1] == 0x4D)
         {
             process_bmp(client_socket, file, operation_code);
@@ -819,11 +825,13 @@ void *handle_client(void *arg)
             const char *error_msg = "Unsupported file format";
             send(client_socket, error_msg, strlen(error_msg), 0);
         }
+        pthread_mutex_unlock(&lock);
 
         fclose(file);
         printf("Ready for next operation.\n");
     }
 }
+
 
 int main()
 {
