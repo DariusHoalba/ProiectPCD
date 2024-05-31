@@ -7,11 +7,16 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <signal.h>
+#include <sqlite3.h>
 
 #define BUFFER_SIZE 4096
 #define PORT 12345
 #define END_SIGNAL "done"
 #define END_SIGNAL_LEN 4
+
+char username[50];
+char password[50];
 
 void generate_modified_filename(const char *input_filename, char *output_filename) {
     char *dot_position = strrchr(input_filename, '.');
@@ -124,7 +129,32 @@ void process_files_in_directory(int client_socket, const char *directory_path, i
     closedir(dir);
 }
 
+/*void update_database_and_disconnect() {
+    sqlite3 *db;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+    char query[256];
+    snprintf(query, sizeof(query), "UPDATE users SET isConnected = 0 WHERE username = '%s'", username);
+    rc = sqlite3_exec(db, query, NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
+    }
+    sqlite3_close(db);
+    exit(0);
+}*/
+
+/*void signal_handler(int signum) {
+    if (signum == SIGINT) {
+        update_database_and_disconnect();
+    }
+}*/
+
 int main() {
+    //signal(SIGINT, signal_handler);
     int client_socket;
     struct sockaddr_in server_addr;
 
@@ -144,6 +174,56 @@ int main() {
         return 1;
     }
 
+    while (1) {
+        char option;
+        while (1) {
+            printf("Enter 1 for login, 2 for registration: ");
+            scanf(" %c", &option);
+
+            if (option == '1' || option == '2') {
+                break;
+            } else {
+                printf("Invalid option. Please enter 1 for login or 2 for registration.\n");
+            }
+        }
+
+        send(client_socket, &option, sizeof(option), 0);
+
+        printf("Enter username: ");
+        scanf("%s", username);
+        send(client_socket, username, strlen(username), 0);
+
+        printf("Enter password: ");
+        scanf("%s", password);
+        send(client_socket, password, strlen(password), 0);
+
+        if (option == '1') {
+            char response[BUFFER_SIZE];
+            int bytes_read = recv(client_socket, response, sizeof(response) - 1, 0);
+            if (bytes_read > 0) {
+                response[bytes_read] = '\0';
+                printf("%s\n", response);
+                if ((strstr(response, "Invalid username or password") != NULL) || (strstr(response, "User already connected") != NULL)){
+                    continue;
+                }
+                else{
+                    break;
+                }
+            }
+        } else if (option == '2') {
+            char response[BUFFER_SIZE];
+            int bytes_read = recv(client_socket, response, sizeof(response) - 1, 0);
+            if (bytes_read > 0) {
+                response[bytes_read] = '\0';
+                printf("%s\n", response);
+                if (strstr(response, "Registration failed") != NULL) {
+                    continue;
+                } else {
+                    printf("Registration successful. Please log in.\n");
+                }
+            }
+        }
+    }
     printf("Connected to server. Enter directory path to send files (Type 'done' to finish):\n");
 
     char directory_path[1024];
@@ -153,6 +233,7 @@ int main() {
 
         if (strcmp(directory_path, "done") == 0) {
             send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
+            //update_database_and_disconnect();
             break;
         }
 
@@ -176,6 +257,7 @@ int main() {
             scanf("%s", input_buffer);
 
             if (strcmp(input_buffer, "done") == 0) {
+                //update_database_and_disconnect();
                 break;
             }
 

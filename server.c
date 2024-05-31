@@ -9,6 +9,7 @@
 #include <jpeglib.h>
 #include <jerror.h>
 #include <png.h>
+#include <sqlite3.h>
 
 #define BUFFER_SIZE 4096
 #define PORT 12345
@@ -18,6 +19,57 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 #pragma pack(push, 1)
 
+char username[50];
+char password[50];
+
+void init_db() {
+    sqlite3 *db;
+    char *err_msg = 0;
+
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+
+    const char *sql = "CREATE TABLE IF NOT EXISTS Users("
+                      "Id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "Username TEXT UNIQUE, "
+                      "Password TEXT, "
+                      "kbmp INTEGER DEFAULT 0, "
+                      "kpng INTEGER DEFAULT 0, "
+                      "kjpg INTEGER DEFAULT 0, "
+                      "isAdmin INTEGER DEFAULT 0, "
+                      "isConnected INTEGER DEFAULT 0);";
+
+    rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "SQL error: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        sqlite3_close(db);
+        return;
+    }
+
+    sqlite3_close(db);
+}
+
+void update_database_and_disconnect(const char *username) {
+    sqlite3 *db;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+    char query[256];
+    snprintf(query, sizeof(query), "UPDATE Clients SET isConnected = 0 WHERE username = '%s'", username);
+    rc = sqlite3_exec(db, query, 0, 0, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to execute query: %s\n", sqlite3_errmsg(db));
+    }
+    sqlite3_close(db);
+}
 
 uint32_t invert_color(uint32_t color, uint32_t mask)
 {
@@ -576,6 +628,7 @@ void handle_png(int client_socket, FILE *file, int operation)
             convert_png_to_black_white(row_pointers, width, height, channels);
             break;
         default:
+            fprintf(stderr,"Code: %d\n",operation);
             fprintf(stderr, "Error: Invalid operation code for PNG.\n");
             for (int y = 0; y < height; y++)
             {
@@ -751,13 +804,217 @@ void handle_jpeg(int client_socket, FILE *file, int operation)
     free(jpeg_buffer);
 }
 
+int register_user(const char *username, const char *password) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    const char *sql = "INSERT INTO Clients(Username, Password) VALUES(?, ?);";
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, password, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return 1;
+}
+
+int login_user(const char *username, const char *password) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int login_success = 0;
+    //1 for success, 0 for failure, -1 for user connected
+
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    const char *sql = "SELECT Password FROM Clients WHERE Username = ?;";
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        const unsigned char *db_password = sqlite3_column_text(stmt, 0);
+        if (strcmp((const char *)db_password, password) == 0) {
+            login_success = 1;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    sqlite3 *db2;
+    sqlite3_stmt *stmt2;
+
+    int rc2 = sqlite3_open("user_db.sqlite", &db2);
+    const char *sql2 = "SELECT isConnected FROM Clients WHERE Username = ?;";
+    rc2 = sqlite3_prepare_v2(db2, sql2, -1, &stmt2, 0);
+    if (rc2 != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return 0;
+    }
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    rc2 = sqlite3_step(stmt);
+    if (rc2 == SQLITE_ROW) {
+        int isConnected = sqlite3_column_int(stmt, 0);
+        if (isConnected == 1) {
+            login_success = -1;
+        }
+    }
+
+    sqlite3_finalize(stmt2);
+    sqlite3_close(db2);
+    return login_success;
+}
+
+int login(int client_socket) {
+
+
+    // Receive username
+    int bytes_read = recv(client_socket, username, sizeof(username), 0);
+    if (bytes_read <= 0) {
+        return 0;
+    }
+    username[bytes_read] = '\0';
+
+    // Receive password
+    bytes_read = recv(client_socket, password, sizeof(password), 0);
+    if (bytes_read <= 0) {
+        return 0;
+    }
+    password[bytes_read] = '\0';
+
+    // Attempt login
+    int val = login_user(username, password);
+    switch (val) {
+        case -1:
+            return -1;
+            break;
+        case 0:
+            return 0;
+            break;
+        case 1:
+            return 1;
+            break;
+        default:
+            return 0;
+            break;
+    }
+}
+
 void *handle_client(void *arg)
 {
     int client_socket = *((int *)arg);
     free(arg);
     char buffer[BUFFER_SIZE];
     int bytes_read;
+    char localusername[50];
+    char localpassword[50];
+    int isAdmin = 0;
 
+    while (1) {
+        char option;
+        bytes_read = recv(client_socket, &option, sizeof(option), 0);
+        if (bytes_read <= 0) {
+            close(client_socket);
+            return NULL;
+        }
+
+        if (option == '1') { // Login
+            int val = login(client_socket);
+            if (val == 1) { //1 success, 0 failure, -1 user connected
+                const char *success_msg = "Login successful\n";
+                strcpy(localusername, username);
+                strcpy(localpassword, password);
+
+                //open db
+                sqlite3 *db;
+                sqlite3_stmt *stmt;
+                int rc = sqlite3_open("user_db.sqlite", &db);
+                if (rc != SQLITE_OK) {
+                    fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+                    return 0;
+                }
+
+                send(client_socket, success_msg, strlen(success_msg), 0);
+                char query[256];
+                snprintf(query, sizeof(query), "UPDATE Clients SET isConnected = 1 WHERE username = '%s'", localusername);
+                //execute query
+                rc = sqlite3_exec(db, query, 0, 0, 0);
+                if (rc != SQLITE_OK) {
+                    fprintf(stderr, "Failed to execute query: %s\n", sqlite3_errmsg(db));
+                }
+                sqlite3_close(db);
+
+                break;
+            } else if (val == 0){
+                const char *error_msg = "Invalid username or password\n";
+                send(client_socket, error_msg, strlen(error_msg), 0);
+            } else{
+                const char *error_msg = "User already connected\n";
+                send(client_socket, error_msg, strlen(error_msg), 0);
+            }
+        } else if (option == '2') { // Register
+            char username[50];
+            char password[50];
+
+            // Receive username
+            bytes_read = recv(client_socket, username, sizeof(username), 0);
+            if (bytes_read <= 0) {
+                close(client_socket);
+                return NULL;
+            }
+            username[bytes_read] = '\0';
+
+            // Receive password
+            bytes_read = recv(client_socket, password, sizeof(password), 0);
+            if (bytes_read <= 0) {
+                close(client_socket);
+                return NULL;
+            }
+            password[bytes_read] = '\0';
+
+            if (register_user(username, password)) {
+                const char *success_msg = "Registration successful\n";
+                send(client_socket, success_msg, strlen(success_msg), 0);
+            } else {
+                const char *error_msg = "Registration failed (username might be taken)\n";
+                send(client_socket, error_msg, strlen(error_msg), 0);
+            }
+        }
+    }
+    if(!isAdmin)
     while (1)
     {
         FILE *file = tmpfile();
@@ -787,6 +1044,7 @@ void *handle_client(void *arg)
         if (total_bytes == 0)
         {
             printf("Client disconnected.\n");
+            update_database_and_disconnect(localusername);
             fclose(file);
             close(client_socket);
             return NULL;
@@ -802,11 +1060,13 @@ void *handle_client(void *arg)
         if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0)
         {
             perror("Failed to receive operation code");
+            update_database_and_disconnect(localusername);
             fclose(file);
             close(client_socket);
             return NULL;
         }
-
+        if(operation_code>100) //python client
+            operation_code = ntohl(operation_code);
         pthread_mutex_lock(&lock);
         if (signature[0] == 0x42 && signature[1] == 0x4D)
         {
@@ -830,6 +1090,9 @@ void *handle_client(void *arg)
         fclose(file);
         printf("Ready for next operation.\n");
     }
+    else{ //Admin
+
+    }
 }
 
 
@@ -839,6 +1102,8 @@ int main()
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
     pthread_t thread_id;
+
+    init_db();
 
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0)
