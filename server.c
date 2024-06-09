@@ -54,7 +54,7 @@ void init_db() {
     sqlite3_close(db);
 }
 
-void update_database_and_disconnect(const char *username) {
+void update_database_and_disconnect(const char *username, int jpg, int bmp, int png) {
     sqlite3 *db;
     int rc = sqlite3_open("user_db.sqlite", &db);
     if (rc != SQLITE_OK) {
@@ -62,14 +62,19 @@ void update_database_and_disconnect(const char *username) {
         sqlite3_close(db);
         return;
     }
-    char query[256];
-    snprintf(query, sizeof(query), "UPDATE Clients SET isConnected = 0 WHERE username = '%s'", username);
+    char query[512];
+    snprintf(query, sizeof(query),
+             "UPDATE Clients SET isConnected = 0, "
+             "kpng = kpng + %d, kjpg = kjpg + %d, kbmp = kbmp + %d "
+             "WHERE username = '%s'",
+             png, jpg, bmp, username);
     rc = sqlite3_exec(db, query, 0, 0, 0);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Failed to execute query: %s\n", sqlite3_errmsg(db));
     }
     sqlite3_close(db);
 }
+
 
 uint32_t invert_color(uint32_t color, uint32_t mask)
 {
@@ -1160,6 +1165,9 @@ void *handle_client(void *arg) {
     char localusername[50];
     char localpassword[50];
     int isAdmin = 0;
+    int kjpg = 0;
+    int kpng = 0;
+    int kbmp = 0;
 
     while (1) {
         char option;
@@ -1282,7 +1290,7 @@ void *handle_client(void *arg) {
 
             if (total_bytes == 0) {
                 printf("Client disconnected.\n");
-                update_database_and_disconnect(localusername);
+                update_database_and_disconnect(localusername, kjpg, kbmp, kpng);
                 fclose(file);
                 close(client_socket);
                 return NULL;
@@ -1297,7 +1305,7 @@ void *handle_client(void *arg) {
             int operation_code;
             if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
                 perror("Failed to receive operation code");
-                update_database_and_disconnect(localusername);
+                update_database_and_disconnect(localusername, kjpg, kbmp, kpng);
                 fclose(file);
                 close(client_socket);
                 return NULL;
@@ -1306,10 +1314,13 @@ void *handle_client(void *arg) {
                 operation_code = ntohl(operation_code);
             pthread_mutex_lock(&lock);
             if (signature[0] == 0x42 && signature[1] == 0x4D) {
+                kbmp ++;
                 process_bmp(client_socket, file, operation_code);
             } else if (signature[0] == 0xFF && signature[1] == 0xD8) {
+                kjpg ++;
                 handle_jpeg(client_socket, file, operation_code);
             } else if (signature[0] == 0x89 && signature[1] == 0x50) {
+                kpng ++;
                 handle_png(client_socket, file, operation_code);
             } else {
                 const char *error_msg = "Unsupported file format";
@@ -1326,7 +1337,7 @@ void *handle_client(void *arg) {
 
             if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
                 perror("Client disconnected");
-                update_database_and_disconnect(localusername);
+                update_database_and_disconnect(localusername, 0, 0, 0);
                 close(client_socket);
                 return NULL;
             }
@@ -1351,7 +1362,7 @@ void *handle_client(void *arg) {
                     break;
                 case 1685024357:
                     printf("Client disconnected.\n");
-                    update_database_and_disconnect(localusername);
+                    update_database_and_disconnect(localusername, 0, 0, 0);
                     close(client_socket);
                     return NULL;
                 default:
