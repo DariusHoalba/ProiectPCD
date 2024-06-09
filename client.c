@@ -18,6 +18,131 @@
 char username[50];
 char password[50];
 
+void admin_menu(int client_socket) {
+    char buffer[256];
+    int command;
+
+    printf("Admin logged in.\n");
+
+    while (1) {
+        int isCorrect = 1;
+        printf("Admin Options:\n");
+        printf("1. See users\n");
+        printf("2. See active users\n");
+        printf("3. Add users\n");
+        printf("4. Delete users\n");
+        printf("Type the number of the desired operation or 'done' to exit:\n");
+
+        scanf("%s", buffer);
+        if (strcmp(buffer, "done") == 0) {
+            break;
+        }
+
+        char *endptr;
+        command = strtol(buffer, &endptr, 10);
+        if (*endptr == '\0' && command >= 1 && command <= 4) {
+            // Valid command
+        } else {
+            isCorrect = 0;
+            printf("Invalid operation code. Please enter a valid operation code (1-4) or 'done' to finish.\n");
+        }
+
+        if (isCorrect) {
+            // Convert command to network byte order
+            int net_command = htonl(command);
+            if (send(client_socket, &net_command, sizeof(net_command), 0) == -1) {
+                perror("send");
+                continue;
+            }
+
+            switch (command) {
+                case 1: {
+                    // Receive and display list of users
+                    int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        printf("List of users:\n%s\n", buffer);
+                    } else {
+                        perror("recv");
+                    }
+                    break;
+                }
+                case 2: {
+                    // Receive and display list of active users
+                    int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        printf("List of active users:\n%s\n", buffer);
+                    } else {
+                        perror("recv");
+                    }
+                    break;
+                }
+                case 3: {
+                    // Send information to add a user
+                    char new_username[50];
+                    char new_password[50];
+
+                    printf("Enter new username: ");
+                    scanf("%s", new_username);
+                    printf("Enter new password: ");
+                    scanf("%s", new_password);
+
+                    // Send username
+                    if (send(client_socket, new_username, strlen(new_username) + 1, 0) == -1) { // +1 to include null terminator
+                        perror("send username");
+                        continue;
+                    }
+                    // Send password
+                    if (send(client_socket, new_password, strlen(new_password) + 1, 0) == -1) { // +1 to include null terminator
+                        perror("send password");
+                        continue;
+                    }
+
+                    // Receive confirmation message
+                    int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        printf("%s\n", buffer);
+                    } else {
+                        perror("recv");
+                    }
+                    break;
+                }
+                case 4: {
+                    // Send information to delete a user
+                    char del_username[50];
+
+                    printf("Enter username to delete: ");
+                    scanf("%s", del_username);
+
+                    if (send(client_socket, del_username, strlen(del_username) + 1, 0) == -1) { // +1 to include null terminator
+                        perror("send");
+                        continue;
+                    }
+
+                    int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        printf("%s\n", buffer);
+                    } else {
+                        perror("recv");
+                    }
+                    break;
+                }
+                default:
+                    printf("Invalid command. Please try again.\n");
+                    break;
+            }
+        }
+    }
+
+    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
+    close(client_socket);
+    printf("Disconnected from server.\n");
+}
+
+
 void generate_modified_filename(const char *input_filename, char *output_filename) {
     char *dot_position = strrchr(input_filename, '.');
     if (dot_position != NULL) {
@@ -129,32 +254,7 @@ void process_files_in_directory(int client_socket, const char *directory_path, i
     closedir(dir);
 }
 
-/*void update_database_and_disconnect() {
-    sqlite3 *db;
-    int rc = sqlite3_open("user_db.sqlite", &db);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
-        return;
-    }
-    char query[256];
-    snprintf(query, sizeof(query), "UPDATE users SET isConnected = 0 WHERE username = '%s'", username);
-    rc = sqlite3_exec(db, query, NULL, NULL, NULL);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
-    }
-    sqlite3_close(db);
-    exit(0);
-}*/
-
-/*void signal_handler(int signum) {
-    if (signum == SIGINT) {
-        update_database_and_disconnect();
-    }
-}*/
-
 int main() {
-    //signal(SIGINT, signal_handler);
     int client_socket;
     struct sockaddr_in server_addr;
 
@@ -202,12 +302,17 @@ int main() {
             int bytes_read = recv(client_socket, response, sizeof(response) - 1, 0);
             if (bytes_read > 0) {
                 response[bytes_read] = '\0';
-                printf("%s\n", response);
                 if ((strstr(response, "Invalid username or password") != NULL) || (strstr(response, "User already connected") != NULL)){
                     continue;
                 }
-                else{
-                    break;
+                else {
+                    if (bytes_read > 0) {
+                        if (strcmp(response, "You are an admin.") == 0) {
+                            admin_menu(client_socket);
+                        } else {
+                            break;
+                        }
+                    }
                 }
             }
         } else if (option == '2') {
@@ -224,6 +329,7 @@ int main() {
             }
         }
     }
+
     printf("Connected to server. Enter directory path to send files (Type 'done' to finish):\n");
 
     char directory_path[1024];
@@ -233,7 +339,6 @@ int main() {
 
         if (strcmp(directory_path, "done") == 0) {
             send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
-            //update_database_and_disconnect();
             break;
         }
 
@@ -257,7 +362,6 @@ int main() {
             scanf("%s", input_buffer);
 
             if (strcmp(input_buffer, "done") == 0) {
-                //update_database_and_disconnect();
                 break;
             }
 

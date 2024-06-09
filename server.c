@@ -933,8 +933,226 @@ int login(int client_socket) {
     }
 }
 
-void *handle_client(void *arg)
-{
+void send_message(int client_socket, const char *message) {
+    size_t length = strlen(message);
+    if (send(client_socket, message, length, 0) == -1) {
+        perror("send_message");
+    }
+}
+
+void see_users(int client_socket) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return;
+    }
+
+    const char *sql = "SELECT Id, Username, Password, kpng, kjpg, kbmp, isAdmin, isConnected FROM Clients;";
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+
+    // Buffer for sending data
+    char buffer[2048];
+    size_t offset = 0;
+
+    // Send table header
+    const char *header = "ID\tUsername\tisAdmin\tisConnected\n"
+                         "-------------------------------------------------------------\n";
+    strncpy(buffer, header, sizeof(buffer));
+    offset = strlen(header);
+
+    // Send each user's details in table format
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int id = sqlite3_column_int(stmt, 0);
+        const unsigned char *username = sqlite3_column_text(stmt, 1);
+        int isAdmin = sqlite3_column_int(stmt, 6);
+        int isConnected = sqlite3_column_int(stmt, 7);
+
+        int written = snprintf(buffer + offset, sizeof(buffer) - offset,
+                               "%d\t%s\t\t%d\t%d\n",
+                               id, username, isAdmin, isConnected);
+
+        if (written > 0 && (size_t)written < sizeof(buffer) - offset) {
+            offset += written;
+        } else {
+            // If buffer is full, send its contents and reset
+            send_message(client_socket, buffer);
+            offset = 0;
+            written = snprintf(buffer + offset, sizeof(buffer) - offset,
+                               "%d\t%s\t\t%d\t%d\n",
+                               id, username, isAdmin, isConnected);
+            offset += written;
+        }
+    }
+
+    // Send any remaining data in the buffer
+    if (offset > 0) {
+        send_message(client_socket, buffer);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+void see_active_users(int client_socket) {
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return;
+    }
+
+    const char *sql = "SELECT Id, Username, Password, kpng, kjpg, kbmp, isAdmin, isConnected FROM Clients WHERE isConnected = 1;";
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+
+    // Buffer for sending data
+    char buffer[2048];
+    size_t offset = 0;
+
+    // Send table header
+    const char *header = "ID\tUsername\tisAdmin\tisConnected\n"
+                         "-------------------------------------------------------------\n";
+    strncpy(buffer, header, sizeof(buffer));
+    offset = strlen(header);
+
+    // Send each active user's details in table format
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int id = sqlite3_column_int(stmt, 0);
+        const unsigned char *username = sqlite3_column_text(stmt, 1);
+        int isAdmin = sqlite3_column_int(stmt, 6);
+        int isConnected = sqlite3_column_int(stmt, 7);
+
+        int written = snprintf(buffer + offset, sizeof(buffer) - offset,
+                               "%d\t%s\t\t%d\t%d\n",
+                               id, username, isAdmin, isConnected);
+
+        if (written > 0 && (size_t)written < sizeof(buffer) - offset) {
+            offset += written;
+        } else {
+            // If buffer is full, send its contents and reset
+            send_message(client_socket, buffer);
+            offset = 0;
+            written = snprintf(buffer + offset, sizeof(buffer) - offset,
+                               "%d\t%s\t\t%d\t%d\n",
+                               id, username, isAdmin, isConnected);
+            offset += written;
+        }
+    }
+
+    // Send any remaining data in the buffer
+    if (offset > 0) {
+        send_message(client_socket, buffer);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+void add_user(int client_socket) {
+    char username[50];
+    char password[50];
+
+    // Receive username
+    int bytes_read = recv(client_socket, username, sizeof(username), 0);
+    if (bytes_read <= 0) {
+        return;
+    }
+    username[bytes_read] = '\0';
+
+    // Receive password
+    bytes_read = recv(client_socket, password, sizeof(password), 0);
+    if (bytes_read <= 0) {
+        return;
+    }
+    password[bytes_read] = '\0';
+
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return;
+    }
+
+    const char *sql = "INSERT INTO Clients (Username, Password) VALUES (?, ?);";
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, password, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_DONE) {
+        const char *success_msg = "User added successfully\n";
+        send(client_socket, success_msg, strlen(success_msg), 0);
+    } else {
+        const char *error_msg = "Failed to add user\n";
+        send(client_socket, error_msg, strlen(error_msg), 0);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+void delete_user(int client_socket) {
+    char username[50];
+
+    // Receive username
+    int bytes_read = recv(client_socket, username, sizeof(username), 0);
+    if (bytes_read <= 0) {
+        return;
+    }
+    username[bytes_read] = '\0';
+
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return;
+    }
+
+    const char *sql = "DELETE FROM Clients WHERE Username = ?;";
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_DONE) {
+        const char *success_msg = "User deleted successfully\n";
+        send(client_socket, success_msg, strlen(success_msg), 0);
+    } else {
+        const char *error_msg = "Failed to delete user\n";
+        send(client_socket, error_msg, strlen(error_msg), 0);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+
+void *handle_client(void *arg) {
     int client_socket = *((int *)arg);
     free(arg);
     char buffer[BUFFER_SIZE];
@@ -967,7 +1185,7 @@ void *handle_client(void *arg)
                     return 0;
                 }
 
-                send(client_socket, success_msg, strlen(success_msg), 0);
+                //send(client_socket, success_msg, strlen(success_msg), 0);
                 char query[256];
                 snprintf(query, sizeof(query), "UPDATE Clients SET isConnected = 1 WHERE username = '%s'", localusername);
                 //execute query
@@ -975,13 +1193,37 @@ void *handle_client(void *arg)
                 if (rc != SQLITE_OK) {
                     fprintf(stderr, "Failed to execute query: %s\n", sqlite3_errmsg(db));
                 }
+
+                // Check if the user is an admin
+                const char *admin_check_sql = "SELECT isAdmin FROM Clients WHERE Username = ?;";
+                rc = sqlite3_prepare_v2(db, admin_check_sql, -1, &stmt, 0);
+                if (rc != SQLITE_OK) {
+                    fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+                    sqlite3_close(db);
+                    //return;
+                }
+
+                sqlite3_bind_text(stmt, 1, localusername, -1, SQLITE_STATIC);
+                rc = sqlite3_step(stmt);
+                if (rc == SQLITE_ROW) {
+                    isAdmin = sqlite3_column_int(stmt, 0);
+                    if (isAdmin == 1) {
+                        printf("User %s is an admin.\n", localusername);
+                        send(client_socket, "You are an admin.", strlen("You are an admin."), 0);
+                    } else {
+                        printf("User %s is not an admin.\n", localusername);
+                        send(client_socket, "You bbb an admin.", strlen("You are an admin."), 0);
+                    }
+                }
+
+                sqlite3_finalize(stmt);
                 sqlite3_close(db);
 
                 break;
-            } else if (val == 0){
+            } else if (val == 0) {
                 const char *error_msg = "Invalid username or password\n";
                 send(client_socket, error_msg, strlen(error_msg), 0);
-            } else{
+            } else {
                 const char *error_msg = "User already connected\n";
                 send(client_socket, error_msg, strlen(error_msg), 0);
             }
@@ -1014,86 +1256,108 @@ void *handle_client(void *arg)
             }
         }
     }
-    if(!isAdmin)
-    while (1)
-    {
-        FILE *file = tmpfile();
-        if (!file)
-        {
-            perror("Failed to create temporary file");
-            close(client_socket);
-            return NULL;
-        }
 
-        long long total_bytes = 0;
-        while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0)
-        {
-            if (bytes_read >= strlen(END_SIGNAL) && strncmp(buffer + bytes_read - strlen(END_SIGNAL), END_SIGNAL, strlen(END_SIGNAL)) == 0)
-            {
-                fwrite(buffer, 1, bytes_read - strlen(END_SIGNAL), file);
-                total_bytes += bytes_read - strlen(END_SIGNAL);
-                break;
+    while (1) {
+        if (!isAdmin) {
+            FILE *file = tmpfile();
+            if (!file) {
+                perror("Failed to create temporary file");
+                close(client_socket);
+                return NULL;
             }
-            fwrite(buffer, 1, bytes_read, file);
-            total_bytes += bytes_read;
-        }
 
-        printf("\n\nTotal bytes: %lld\n\n", total_bytes);
-        fseek(file, 0, SEEK_SET);
+            long long total_bytes = 0;
+            while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
+                if (bytes_read >= strlen(END_SIGNAL) && strncmp(buffer + bytes_read - strlen(END_SIGNAL), END_SIGNAL, strlen(END_SIGNAL)) == 0) {
+                    fwrite(buffer, 1, bytes_read - strlen(END_SIGNAL), file);
+                    total_bytes += bytes_read - strlen(END_SIGNAL);
+                    break;
+                }
+                fwrite(buffer, 1, bytes_read, file);
+                total_bytes += bytes_read;
+            }
 
-        if (total_bytes == 0)
-        {
-            printf("Client disconnected.\n");
-            update_database_and_disconnect(localusername);
+            printf("\n\nTotal bytes: %lld\n\n", total_bytes);
+            fseek(file, 0, SEEK_SET);
+
+            if (total_bytes == 0) {
+                printf("Client disconnected.\n");
+                update_database_and_disconnect(localusername);
+                fclose(file);
+                close(client_socket);
+                return NULL;
+            }
+            const char *confirmation = "File received";
+            send(client_socket, confirmation, strlen(confirmation), 0);
+
+            unsigned char signature[2];
+            fread(signature, 1, 2, file);
+            fseek(file, 0, SEEK_SET);
+
+            int operation_code;
+            if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
+                perror("Failed to receive operation code");
+                update_database_and_disconnect(localusername);
+                fclose(file);
+                close(client_socket);
+                return NULL;
+            }
+            if (operation_code > 100) //python client
+                operation_code = ntohl(operation_code);
+            pthread_mutex_lock(&lock);
+            if (signature[0] == 0x42 && signature[1] == 0x4D) {
+                process_bmp(client_socket, file, operation_code);
+            } else if (signature[0] == 0xFF && signature[1] == 0xD8) {
+                handle_jpeg(client_socket, file, operation_code);
+            } else if (signature[0] == 0x89 && signature[1] == 0x50) {
+                handle_png(client_socket, file, operation_code);
+            } else {
+                const char *error_msg = "Unsupported file format";
+                send(client_socket, error_msg, strlen(error_msg), 0);
+            }
+            pthread_mutex_unlock(&lock);
+
             fclose(file);
-            close(client_socket);
-            return NULL;
-        }
-        const char *confirmation = "File received";
-        send(client_socket, confirmation, strlen(confirmation), 0);
+            printf("Ready for next operation.\n");
+        } else { // Admin
+            int operation_code;
 
-        unsigned char signature[2];
-        fread(signature, 1, 2, file);
-        fseek(file, 0, SEEK_SET);
+            printf("Sa-l ia dracu\n\n");
 
-        int operation_code;
-        if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0)
-        {
-            perror("Failed to receive operation code");
-            update_database_and_disconnect(localusername);
-            fclose(file);
-            close(client_socket);
-            return NULL;
-        }
-        if(operation_code>100) //python client
+            if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
+                perror("Client disconnected");
+                update_database_and_disconnect(localusername);
+                close(client_socket);
+                return NULL;
+            }
+
+            printf("Operation code: %d\n", operation_code);
             operation_code = ntohl(operation_code);
-        pthread_mutex_lock(&lock);
-        if (signature[0] == 0x42 && signature[1] == 0x4D)
-        {
-            process_bmp(client_socket, file, operation_code);
-        }
-        else if (signature[0] == 0xFF && signature[1] == 0xD8)
-        {
-            handle_jpeg(client_socket, file, operation_code);
-        }
-        else if (signature[0] == 0x89 && signature[1] == 0x50)
-        {
-            handle_png(client_socket, file, operation_code);
-        }
-        else
-        {
-            const char *error_msg = "Unsupported file format";
-            send(client_socket, error_msg, strlen(error_msg), 0);
-        }
-        pthread_mutex_unlock(&lock);
+            printf("Operation code formatted: %d\n", operation_code);
 
-        fclose(file);
-        printf("Ready for next operation.\n");
-    }
-    else{ //Admin
-
+            switch (operation_code) {
+                case 1:
+                    see_users(client_socket);
+                    //send(client_socket, "La misto", strlen("La misto"), 0);
+                    break;
+                case 2:
+                    see_active_users(client_socket);
+                    break;
+                case 3:
+                    add_user(client_socket);
+                    break;
+                case 4:
+                    delete_user(client_socket);
+                    break;
+                default:
+                    const char *error_msg = "Invalid operation code";
+                    send(client_socket, error_msg, strlen(error_msg), 0);
+                    break;
+            }
+        }
     }
 }
+
 
 
 int main()
