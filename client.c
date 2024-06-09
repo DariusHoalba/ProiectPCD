@@ -137,9 +137,10 @@ void admin_menu(int client_socket) {
         }
     }
 
-    send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
+    //send(client_socket, END_SIGNAL, strlen(END_SIGNAL), 0);
     close(client_socket);
     printf("Disconnected from server.\n");
+    exit(0);
 }
 
 
@@ -302,7 +303,12 @@ int main() {
             int bytes_read = recv(client_socket, response, sizeof(response) - 1, 0);
             if (bytes_read > 0) {
                 response[bytes_read] = '\0';
-                if ((strstr(response, "Invalid username or password") != NULL) || (strstr(response, "User already connected") != NULL)){
+                if ((strstr(response, "Invalid username or password") != NULL)  ){
+                    printf("Invalid username or password\n");
+                    continue;
+                }
+                else if((strstr(response, "User already connected") != NULL)){
+                    printf("User already connected\n");
                     continue;
                 }
                 else {

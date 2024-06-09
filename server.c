@@ -1349,6 +1349,11 @@ void *handle_client(void *arg) {
                 case 4:
                     delete_user(client_socket);
                     break;
+                case 1685024357:
+                    printf("Client disconnected.\n");
+                    update_database_and_disconnect(localusername);
+                    close(client_socket);
+                    return NULL;
                 default:
                     const char *error_msg = "Invalid operation code";
                     send(client_socket, error_msg, strlen(error_msg), 0);
