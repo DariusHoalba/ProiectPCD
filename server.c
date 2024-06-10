@@ -22,6 +22,9 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 char username[50];
 char password[50];
 
+time_t rawtime;
+struct tm * timeinfo;
+
 void init_db() {
     sqlite3 *db;
     char *err_msg = 0;
@@ -1076,12 +1079,16 @@ void add_user(int client_socket) {
     }
     username[bytes_read] = '\0';
 
+    printf("Username: %s\n", username);
+
     // Receive password
     bytes_read = recv(client_socket, password, sizeof(password), 0);
     if (bytes_read <= 0) {
         return;
     }
     password[bytes_read] = '\0';
+
+    printf("Password: %s\n", password);
 
     sqlite3 *db;
     sqlite3_stmt *stmt;
@@ -1090,6 +1097,8 @@ void add_user(int client_socket) {
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
         return;
     }
+
+    printf("Before insert\n");
 
     const char *sql = "INSERT INTO Clients (Username, Password) VALUES (?, ?);";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
@@ -1113,6 +1122,7 @@ void add_user(int client_socket) {
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+
 }
 
 void delete_user(int client_socket) {
@@ -1133,7 +1143,7 @@ void delete_user(int client_socket) {
         return;
     }
 
-    const char *sql = "DELETE FROM Clients WHERE Username = ?;";
+    const char *sql = "DELETE FROM Clients WHERE Username = ? AND isAdmin = 0;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
@@ -1145,11 +1155,75 @@ void delete_user(int client_socket) {
 
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_DONE) {
-        const char *success_msg = "User deleted successfully\n";
+        const char *success_msg = "Operation executed\n";
         send(client_socket, success_msg, strlen(success_msg), 0);
     } else {
         const char *error_msg = "Failed to delete user\n";
         send(client_socket, error_msg, strlen(error_msg), 0);
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+void displayStats(int client_socket){
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return;
+    }
+    //get kjpg kpng and kbmp from db
+    const char *sql = "SELECT SUM(kjpg), SUM(kpng), SUM(kbmp) FROM Clients;";
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;}
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        int kjpg = sqlite3_column_int(stmt, 0);
+        int kpng = sqlite3_column_int(stmt, 1);
+        int kbmp = sqlite3_column_int(stmt, 2);
+        char out[256];
+        snprintf(out, sizeof(out), "Total number of JPEG images processed: %d\n", kjpg);
+        snprintf(out + strlen(out), sizeof(out) - strlen(out), "Total number of PNG images processed: %d\n", kpng);
+        snprintf(out + strlen(out), sizeof(out) - strlen(out), "Total number of BMP images processed: %d\n", kbmp);
+        snprintf(out + strlen(out), sizeof(out) - strlen(out), "Total number of images processed: %d\n", kjpg + kpng + kbmp);
+        send_message(client_socket, out);
+    } else {
+        send_message(client_socket, "Failed to get stats\n");
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+void disconnectAllUsers(){
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_open("user_db.sqlite", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        return;
+    }
+
+    const char *sql = "UPDATE Clients SET isConnected = 0;";
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+
+    }
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_DONE) {
+        printf("Server shutdown triggered.\nAll users disconnected\n");
+    } else {
+        printf("Failed to disconnect all users\n");
     }
 
     sqlite3_finalize(stmt);
@@ -1333,8 +1407,6 @@ void *handle_client(void *arg) {
         } else { // Admin
             int operation_code;
 
-            printf("Sa-l ia dracu\n\n");
-
             if (recv(client_socket, &operation_code, sizeof(operation_code), 0) <= 0) {
                 perror("Client disconnected");
                 update_database_and_disconnect(localusername, 0, 0, 0);
@@ -1360,7 +1432,32 @@ void *handle_client(void *arg) {
                 case 4:
                     delete_user(client_socket);
                     break;
-                case 1685024357:
+                case 5:
+                    displayStats(client_socket);
+                    break;
+                case 6:
+                    disconnectAllUsers();
+                    exit(0);
+                    break;
+                case 7:
+                    //calculate uptime
+                    time_t uptime;
+                    time(&uptime);
+
+                    double uptime_seconds = difftime(uptime, rawtime);
+
+                    int days = uptime_seconds / 86400;
+                    int hours = (uptime_seconds - days * 86400) / 3600;
+                    int minutes = (uptime_seconds - days * 86400 - hours * 3600) / 60;
+                    int seconds = uptime_seconds - days * 86400 - hours * 3600 - minutes * 60;
+
+                    char uptime_str[256];
+                    snprintf(uptime_str, sizeof(uptime_str), "Uptime: %d days, %d hours, %d minutes, %d seconds\n", days, hours, minutes, seconds);
+
+                    send_message(client_socket, uptime_str);
+
+                    break;
+                case 1685024357: //done
                     printf("Client disconnected.\n");
                     update_database_and_disconnect(localusername, 0, 0, 0);
                     close(client_socket);
@@ -1382,6 +1479,10 @@ int main()
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
     pthread_t thread_id;
+
+    //getTime
+    time ( &rawtime );
+    timeinfo = localtime ( &rawtime );
 
     init_db();
 

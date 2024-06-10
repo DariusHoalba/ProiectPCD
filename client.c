@@ -19,7 +19,7 @@ char username[50];
 char password[50];
 
 void admin_menu(int client_socket) {
-    char buffer[256];
+    char buffer[BUFFER_SIZE];
     int command;
 
     printf("Admin logged in.\n");
@@ -31,6 +31,9 @@ void admin_menu(int client_socket) {
         printf("2. See active users\n");
         printf("3. Add users\n");
         printf("4. Delete users\n");
+        printf("5. Stats\n");
+        printf("6. Shutdown server\n");
+        printf("7. Uptime\n");
         printf("Type the number of the desired operation or 'done' to exit:\n");
 
         scanf("%s", buffer);
@@ -40,11 +43,11 @@ void admin_menu(int client_socket) {
 
         char *endptr;
         command = strtol(buffer, &endptr, 10);
-        if (*endptr == '\0' && command >= 1 && command <= 4) {
+        if (*endptr == '\0' && command >= 1 && command <= 7) {
             // Valid command
         } else {
             isCorrect = 0;
-            printf("Invalid operation code. Please enter a valid operation code (1-4) or 'done' to finish.\n");
+            printf("Invalid operation code. Please enter a valid operation code (1-6) or 'done' to finish.\n");
         }
 
         if (isCorrect) {
@@ -85,19 +88,10 @@ void admin_menu(int client_socket) {
 
                     printf("Enter new username: ");
                     scanf("%s", new_username);
+                    send(client_socket, new_username, strlen(new_username) + 1, 0);
                     printf("Enter new password: ");
                     scanf("%s", new_password);
-
-                    // Send username
-                    if (send(client_socket, new_username, strlen(new_username) + 1, 0) == -1) { // +1 to include null terminator
-                        perror("send username");
-                        continue;
-                    }
-                    // Send password
-                    if (send(client_socket, new_password, strlen(new_password) + 1, 0) == -1) { // +1 to include null terminator
-                        perror("send password");
-                        continue;
-                    }
+                    send(client_socket, new_password, strlen(new_password) + 1, 0);
 
                     // Receive confirmation message
                     int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
@@ -130,8 +124,27 @@ void admin_menu(int client_socket) {
                     }
                     break;
                 }
-                default:
-                    printf("Invalid command. Please try again.\n");
+                case 5:
+                    int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        printf("Stats:\n%s\n", buffer);
+                    } else {
+                        perror("recv");
+                    }
+                    break;
+                case 6:
+                    printf("Server is shutting down. You will be disconnected\n");
+                    exit(0);
+                    break;
+                case 7:
+                    int bytes = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                    if (bytes > 0) {
+                        buffer[bytes] = '\0';
+                        printf("Uptime: %s\n", buffer);
+                    } else {
+                        perror("recv");
+                    }
                     break;
             }
         }
