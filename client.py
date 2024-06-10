@@ -26,7 +26,9 @@ def admin_menu(client_socket):
 
         command = input().strip()
         if command == 'done':
-            break
+            client_socket.close()
+            print("Disconnected from server.")
+            exit(0)
 
         try:
             command = int(command)

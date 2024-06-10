@@ -22,6 +22,8 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 char username[50];
 char password[50];
 
+int server_socket;
+
 time_t rawtime;
 struct tm * timeinfo;
 
@@ -1437,6 +1439,7 @@ void *handle_client(void *arg) {
                     break;
                 case 6:
                     disconnectAllUsers();
+                    close(server_socket);
                     exit(0);
                     break;
                 case 7:
@@ -1472,10 +1475,9 @@ void *handle_client(void *arg) {
 }
 
 
-
 int main()
 {
-    int server_socket, *new_sock;
+    int  *new_sock;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
     pthread_t thread_id;
